@@ -47,6 +47,18 @@ CHARGE_MIN_TO_BURST = 0.12
 CLAP_GAP = 110            # eller bu mesafeden yakınsa "el çırpma"
 CLAP_PREVIOUS_GAP = 260   # önceki karede en az bu kadar açık olmalı
 
+# ---------------------------------------------------------------- fırlatma
+THROW_ENABLED = True
+THROW_SPEED = 1150.0      # px/s: eli bu hızdan hızlı savurursan top fırlar
+THROW_VELOCITY_GAIN = 1.35
+THROW_COOLDOWN = 0.45     # aynı elle iki atış arası en az süre (saniye)
+THROW_MAX = 6             # sahnede aynı anda en fazla top
+THROW_LIFE = 3.2          # saniye; süre bitince patlar
+THROW_GRAVITY = 260.0     # px/s^2
+THROW_WALL_BOUNCE = 0.78
+THROW_HAND_BOUNCE = 0.86
+THROW_RADIUS = (14.0, 20.0)
+
 # ---------------------------------------------------------------- renkler (BGR)
 # Her palet: koyu -> orta -> parlak -> çekirdek
 PALETTES = {
@@ -71,9 +83,17 @@ PALETTES = {
 }
 DEFAULT_PALETTE = "gold"
 
+# Yıldırım her zaman elektrik mavisidir (palet değişse bile).
+LIGHTNING_PALETTE = (
+    (150, 45, 10),
+    (255, 125, 30),
+    (255, 210, 125),
+    (250, 250, 255),
+)
+
 # ---------------------------------------------------------------- HUD
 HUD_ALPHA = 0.45
 HUD_TEXT = (235, 240, 245)
 HUD_DIM = (150, 160, 172)
 
-KEYS_HELP = "1 ORB  2 HOLO  3 PORTAL  4 LIGHT  0 AUTO  |  G shape  P color  D debug  S shot  R rec  F full  Q quit"
+KEYS_HELP = "1 ORB  2 HOLO  3 PORTAL  4 LIGHT  0 AUTO  |  G shape  P color  T throw  D debug  S shot  R rec  F full  Q quit"

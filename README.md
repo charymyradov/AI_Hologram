@@ -37,6 +37,9 @@ python main.py --camera 1     # ikinci kamera
 
 ## Jestler
 
+- **Fırlatma**: eli hızlıca savur → avuçtan enerji topu çıkar. Toplar duvarlardan ve
+  avuçlardan seker, avuçla vurdukça hızlanır, ömrü bitince patlayıp şok dalgası bırakır.
+  Sahnede aynı anda en fazla 6 top (en eskisi patlar). `T` ile aç/kapat.
 - **Pinch + bırak**: iki elle başparmak-işaret birleştir, tut, bırak → şok dalgası.
   Tutma süresi arttıkça dalga büyür (HUD'daki `CHARGE` çubuğu).
 - **El çırpma**: eller hızla birbirine yaklaşırsa güçlü şok dalgası.
@@ -48,10 +51,14 @@ python main.py --camera 1     # ikinci kamera
 ```
 Q / ESC : çıkış          P : palet (gold / cyan / violet)
 0-4     : mod            G : hologram şekli (küp / torus / DNA)
-D       : debug iskelet  S : ekran görüntüsü (captures/)
+D       : debug iskelet  T : fırlatma aç/kapat
+S       : ekran görüntüsü (captures/)
 R       : video kaydı    F : tam ekran
 H       : HUD'u gizle
 ```
+
+> Yıldırım modu paletten bağımsız olarak her zaman elektrik mavisidir
+> (`config.LIGHTNING_PALETTE`).
 
 ## Dosyalar
 
@@ -61,6 +68,7 @@ config.py     tüm sabitler: çözünürlük, renkler, bloom, yarıçaplar, jest
 tracking.py   MediaPipe sarmalayıcı + HandState (merkez, pinch, açıklık, hız)
 fx.py         radyal parlama, bloom, parçacık sistemi, şok dalgası
 effects.py    ORB / PORTAL / LIGHTNING / HOLO efektleri
+projectiles.py  fırlatılabilir enerji topları (fizik, sekme, patlama)
 hud.py        FPS, mod, şarj çubuğu, ipuçları
 captures/     ekran görüntüleri ve kayıtlar
 legacy/       eski tek dosyalık sürüm
@@ -92,6 +100,8 @@ Daha hızlı takip için `config.MODEL_COMPLEXITY = 0` ve/veya
 
 ## Ayarlama ipuçları
 
+- Fırlatma çok kolay/zor tetikleniyorsa: `THROW_SPEED` (varsayılan 1150 px/s).
+- Toplar çok hızlı/yavaş düşüyorsa: `THROW_GRAVITY`; sekme gücü: `THROW_WALL_BOUNCE`.
 - Fazla parlıyorsa: `BLOOM_THRESHOLD` ↑, `BLOOM_STRENGTH` ↓.
 - Efekt geç takip ediyorsa: `fx.smooth(...)` çağrılarındaki `speed` değerini ↑.
 - Pinch zor algılanıyorsa: `config.PINCH_THRESHOLD` ↓ (0.6 gibi).

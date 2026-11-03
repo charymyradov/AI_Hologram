@@ -18,7 +18,8 @@ def _bar(frame, x, y, width, height, value, color) -> None:
 
 def draw(frame, fps: float, mode: str | None, hand_count: int, charge: float,
          palette_name: str, needs: int = 0, shape: str | None = None,
-         recording: bool = False) -> None:
+         recording: bool = False, throw_count: int = 0,
+         throw_enabled: bool = True) -> None:
     h, w = frame.shape[:2]
 
     # yarı saydam üst bar
@@ -32,6 +33,12 @@ def draw(frame, fps: float, mode: str | None, hand_count: int, charge: float,
 
     if shape:
         cv2.putText(frame, shape, (190, 53), FONT, 0.62, (120, 190, 255), 1, cv2.LINE_AA)
+
+    if throw_count:
+        cv2.circle(frame, (330, 48), 5, (0, 190, 255), -1, cv2.LINE_AA)
+        cv2.putText(frame, f"{throw_count}", (342, 53), FONT, 0.55, (0, 190, 255), 1, cv2.LINE_AA)
+    elif not throw_enabled:
+        cv2.putText(frame, "THROW OFF", (330, 53), FONT, 0.45, (120, 120, 130), 1, cv2.LINE_AA)
 
     cv2.putText(frame, f"{fps:4.0f} FPS", (w - 110, 30), FONT, 0.55,
                 config.HUD_DIM, 1, cv2.LINE_AA)
@@ -56,6 +63,10 @@ def draw(frame, fps: float, mode: str | None, hand_count: int, charge: float,
         size = cv2.getTextSize(hint, FONT, 0.72, 1)[0]
         cv2.putText(frame, hint, ((w - size[0]) // 2, h - 78), FONT, 0.72,
                     (0, 220, 255), 1, cv2.LINE_AA)
+
+    if throw_enabled and hand_count:
+        cv2.putText(frame, "HIZLI SAVUR = FIRLAT", (24, 96), FONT, 0.45,
+                    (0, 160, 210), 1, cv2.LINE_AA)
 
     # alt bilgi
     cv2.putText(frame, config.KEYS_HELP, (24, h - 22), cv2.FONT_HERSHEY_SIMPLEX, 0.45,

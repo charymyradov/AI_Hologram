@@ -258,7 +258,7 @@ class LightningEffect(Effect):
         if len(hands) < 2:
             return
 
-        deep, mid, bright, core = palette
+        _, mid, bright, core = config.LIGHTNING_PALETTE
         p1 = hands[0].fingertip(8)
         p2 = hands[1].fingertip(8)
 

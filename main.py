@@ -32,6 +32,7 @@ import config
 import fx
 import hud
 from effects import HologramEffect, LightningEffect, OrbEffect, PortalEffect
+from projectiles import ThrowableField
 from tracking import HandTracker
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +58,7 @@ class App:
         self.tracker = HandTracker()
         self.bloom = fx.Bloom()
         self.waves = fx.ShockwaveField()
+        self.throwables = ThrowableField(on_pop=self._on_impact)
 
         self.orb = OrbEffect()
         self.holo = HologramEffect()
@@ -71,6 +73,8 @@ class App:
 
         self.charge = 0.0
         self._prev_gap: float | None = None
+        self._last_throw: dict[str, float] = {}
+        self.throw_enabled = config.THROW_ENABLED
 
         self.debug = debug
         self.show_hud = True
@@ -130,6 +134,30 @@ class App:
             self.charge = 0.0
         self._prev_gap = gap
 
+    # ---------------------------------------------------------- fırlatma
+    def _maybe_throw(self, hands) -> None:
+        """Eli hızlı savurmak avuçtan bir enerji topu fırlatır."""
+        now = time.perf_counter()
+        for hand in hands:
+            speed = float(np.linalg.norm(hand.velocity))
+            if speed < config.THROW_SPEED:
+                continue
+            if now - self._last_throw.get(hand.label, 0.0) < config.THROW_COOLDOWN:
+                continue
+
+            self._last_throw[hand.label] = now
+            gain = config.THROW_VELOCITY_GAIN
+            self.throwables.spawn(
+                hand.center[0], hand.center[1],
+                float(hand.velocity[0]) * gain,
+                float(hand.velocity[1]) * gain,
+                self.palette[2],
+            )
+
+    def _on_impact(self, x: float, y: float, radius: float, color) -> None:
+        """Top patladığında şok dalgası bırakır."""
+        self.waves.burst(x, y, radius, color, life=0.55, thickness=4.0)
+
     # ------------------------------------------------------------- döngü
     def run(self) -> None:
         prev_time = time.perf_counter()
@@ -160,11 +188,18 @@ class App:
             hands = self.tracker.process(frame, dt)
             self.update_gestures(hands, dt)
 
+            if self.throw_enabled:
+                self._maybe_throw(hands)
+                self.throwables.update(dt, hands, frame.shape[1], frame.shape[0])
+
             mode = self.active_mode(len(hands))
             effect = self.effects.get(mode) if mode else None
             if effect is not None:
                 effect.update(dt, hands, self.charge)
                 effect.draw(self.layer, hands, self.charge, self.palette)
+
+            if self.throw_enabled:
+                self.throwables.draw(self.layer, self.palette[2])
 
             self.waves.update(dt)
             self.waves.draw(self.layer)
@@ -185,6 +220,8 @@ class App:
                     needs=effect.needs if effect else 0,
                     shape=self.holo.shape_name if mode == "HOLO" else None,
                     recording=self.writer is not None,
+                    throw_count=len(self.throwables.items) if self.throw_enabled else 0,
+                    throw_enabled=self.throw_enabled,
                 )
 
             if self.writer is not None:
@@ -219,6 +256,10 @@ class App:
             self.save_screenshot(frame)
         elif key == ord("r"):
             self.toggle_recording(frame)
+        elif key == ord("t"):
+            self.throw_enabled = not self.throw_enabled
+            if not self.throw_enabled:
+                self.throwables.clear()
         elif key == ord("f"):
             self.toggle_fullscreen()
         return True
