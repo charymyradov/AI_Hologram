@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Sanal ortamlar
+venv/
+.venv/
+env/
+
+# Çıktılar
+captures/*.png
+captures/*.mp4
+captures/*.avi
+
+# Editör / işletim sistemi
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
