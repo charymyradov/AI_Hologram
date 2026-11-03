@@ -211,3 +211,242 @@ class PortalEffect(Effect):
                       gain=0.5 + 0.4 * charge)
 
         self.particles.draw(layer, bright, gain=0.7)
+
+
+# ================================================================ LIGHTNING
+def _bolt(p1, p2, depth: int = 5, jitter: float = 0.35) -> np.ndarray:
+    """İki nokta arasında orta-nokta yer değiştirmeli yıldırım yolu üretir (vektörize)."""
+    pts = np.array([p1, p2], np.float32)
+    for _ in range(depth):
+        a, b = pts[:-1], pts[1:]
+        delta = b - a
+        length = np.linalg.norm(delta, axis=1)
+        normal = np.stack([-delta[:, 1], delta[:, 0]], axis=1) / (length[:, None] + 1e-6)
+        offset = (np.random.rand(len(delta)) - 0.5) * length * jitter
+        mids = (a + b) * 0.5 + normal * offset[:, None]
+
+        out = np.empty((len(pts) * 2 - 1, 2), np.float32)
+        out[0::2] = pts
+        out[1::2] = mids
+        pts = out
+    return pts
+
+
+class LightningEffect(Effect):
+    """İki elin işaret parmakları arasında enerji akışı."""
+
+    name = "LIGHTNING"
+    needs = 2
+
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.particles = fx.ParticleSystem(240)
+        self._rebuild = 0.0
+
+    def update(self, dt: float, hands, charge: float = 0.0) -> None:
+        self.t += dt
+        self._rebuild -= dt
+        if len(hands) >= 2:
+            mid = fx.midpoint(hands[0].center, hands[1].center)
+            if self._rebuild <= 0:
+                self._rebuild = 0.05
+                self.particles.emit(mid[0], mid[1], 26, 4, speed=60.0,
+                                    life=(0.25, 0.6))
+            self.particles.update(dt, mid[0], mid[1], pull=40.0, swirl=70.0)
+
+    def draw(self, layer, hands, charge: float, palette) -> None:
+        if len(hands) < 2:
+            return
+
+        deep, mid, bright, core = palette
+        p1 = hands[0].fingertip(8)
+        p2 = hands[1].fingertip(8)
+
+        # geniş ve soluk taban çizgisi -> bloom ile yumuşak hale
+        main = _bolt(p1, p2, depth=6, jitter=0.35)
+        cv2.polylines(layer, [main.astype(np.int32)], False,
+                      fx.scale_color(mid, 0.55), 9, cv2.LINE_AA)
+        cv2.polylines(layer, [main.astype(np.int32)], False,
+                      fx.scale_color(mid, 0.95), 4, cv2.LINE_AA)
+
+        # dallanan yıldırımlar
+        for branch in range(3):
+            jitter = 0.45 - 0.07 * branch
+            pts = _bolt(p1, p2, depth=6, jitter=jitter)
+            color = core if branch == 0 else fx.scale_color(bright, 0.9 - 0.18 * branch)
+            thickness = 2 if branch == 0 else 1
+            cv2.polylines(layer, [pts.astype(np.int32)], False, color,
+                          thickness, cv2.LINE_AA)
+
+            # yol üzerinde kıvılcım düğümleri (bloom bunları haleye çevirir)
+            for idx in range(6, len(pts) - 6, 11):
+                cv2.circle(layer, (int(pts[idx][0]), int(pts[idx][1])), 3,
+                           fx.scale_color(bright, 0.7), -1, cv2.LINE_AA)
+
+        # uçlarda toplanan enerji
+        for tip in (p1, p2):
+            fx.add_radial(layer, tip[0], tip[1], 40, mid, power=2.4, gain=0.55)
+            fx.add_radial(layer, tip[0], tip[1], 14, core, power=1.6, gain=1.0)
+
+        self.particles.draw(layer, bright, gain=0.7)
+
+
+# ==================================================================== HOLO
+def _cube_geometry():
+    v = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)],
+                 np.float32)
+    edges = []
+    for i in range(8):
+        for j in range(i + 1, 8):
+            if bin(i ^ j).count("1") == 1:
+                edges.append([i, j])
+    return v, edges
+
+
+def _torus_geometry(seg_u: int = 26, seg_v: int = 12, big: float = 0.95, small: float = 0.38):
+    verts = []
+    grid = []
+    for i in range(seg_u):
+        u = 2.0 * math.pi * i / seg_u
+        row = []
+        for j in range(seg_v):
+            v = 2.0 * math.pi * j / seg_v
+            x = (big + small * math.cos(v)) * math.cos(u)
+            y = small * math.sin(v)
+            z = (big + small * math.cos(v)) * math.sin(u)
+            row.append(len(verts))
+            verts.append([x, y, z])
+        grid.append(row)
+
+    paths = []
+    for i in range(seg_u):
+        paths.append([grid[i][j] for j in range(seg_v)] + [grid[i][0]])
+    for j in range(seg_v):
+        paths.append([grid[i][j] for i in range(seg_u)] + [grid[0][j]])
+    return np.array(verts, np.float32), paths
+
+
+def _dna_geometry(steps: int = 46, radius: float = 0.55, height: float = 1.6):
+    verts = []
+    helix_a, helix_b = [], []
+    for i in range(steps):
+        p = i / (steps - 1)
+        ang = p * 4.0 * math.pi
+        y = (p - 0.5) * height * 2.0
+        a = [math.cos(ang) * radius, y, math.sin(ang) * radius]
+        b = [math.cos(ang + math.pi) * radius, y, math.sin(ang + math.pi) * radius]
+        helix_a.append(len(verts)); verts.append(a)
+        helix_b.append(len(verts)); verts.append(b)
+
+    paths = [helix_a, helix_b]
+    for i in range(0, steps, 4):
+        paths.append([helix_a[i], helix_b[i]])
+    return np.array(verts, np.float32), paths
+
+
+class HologramEffect(Effect):
+    """İki el arasında döndürülebilen wireframe nesne (küp / torus / DNA)."""
+
+    name = "HOLO"
+    needs = 2
+    SHAPES = ("CUBE", "TORUS", "DNA")
+
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.shape_index = 0
+        self._geometries = {
+            "CUBE": _cube_geometry(),
+            "TORUS": _torus_geometry(),
+            "DNA": _dna_geometry(),
+        }
+        self.cx: float | None = None
+        self.cy: float | None = None
+        self.scale = 120.0
+        self.yaw = 0.0
+        self.pitch = -0.35
+
+    @property
+    def shape_name(self) -> str:
+        return self.SHAPES[self.shape_index]
+
+    def next_shape(self) -> None:
+        self.shape_index = (self.shape_index + 1) % len(self.SHAPES)
+
+    def update(self, dt: float, hands, charge: float = 0.0) -> None:
+        self.t += dt
+
+        target_yaw = self.yaw + dt * 0.35
+        target_pitch = -0.32 + 0.16 * math.sin(self.t * 0.8)
+        cx, cy, target_scale = self.cx, self.cy, self.scale
+
+        if len(hands) >= 2:
+            a, b = hands[0].center, hands[1].center
+            cx, cy = fx.midpoint(a, b)
+            dist = float(np.linalg.norm(a - b))
+            target_scale = float(np.clip(dist * 0.5, 90.0, 300.0))
+
+            # elleri çevirmek nesneyi döndürür
+            angle = math.atan2(float(b[1] - a[1]), float(b[0] - a[0]))
+            target_yaw = self.t * 0.35 - angle
+            target_pitch = -0.32 + 0.35 * math.sin(self.t * 0.8)
+
+        if cx is None:
+            return
+        if self.cx is None:
+            self.cx, self.cy, self.scale = cx, cy, target_scale
+        else:
+            self.cx = fx.smooth(self.cx, cx, dt, 12.0)
+            self.cy = fx.smooth(self.cy, cy, dt, 12.0)
+            self.scale = fx.smooth(self.scale, target_scale, dt, 8.0)
+
+        self.yaw = fx.smooth(self.yaw, target_yaw, dt, 6.0)
+        self.pitch = fx.smooth(self.pitch, target_pitch, dt, 5.0)
+
+    def _project(self, verts: np.ndarray):
+        cy_, sy_ = math.cos(self.yaw), math.sin(self.yaw)
+        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
+        ry = np.array([[cy_, 0.0, sy_], [0.0, 1.0, 0.0], [-sy_, 0.0, cy_]], np.float32)
+        rx = np.array([[1.0, 0.0, 0.0], [0.0, cp, -sp], [0.0, sp, cp]], np.float32)
+
+        p = verts @ (rx @ ry).T
+        depth = p[:, 2] + 6.5
+        focal = 3.2
+        screen = np.empty((len(p), 2), np.float32)
+        screen[:, 0] = self.cx + (p[:, 0] * focal / depth) * self.scale
+        screen[:, 1] = self.cy + (p[:, 1] * focal / depth) * self.scale
+        return screen, depth
+
+    def draw(self, layer, hands, charge: float, palette) -> None:
+        if self.cx is None:
+            return
+
+        deep, mid, bright, core = palette
+        verts, paths = self._geometries[self.shape_name]
+        screen, depth = self._project(verts)
+
+        d_min, d_max = float(depth.min()), float(depth.max())
+        span = max(d_max - d_min, 1e-3)
+        shade = 0.35 + 0.65 * (1.0 - (depth - d_min) / span)  # yakın = parlak
+
+        for path in paths:
+            for a, b in zip(path[:-1], path[1:]):
+                k = 0.5 * (shade[a] + shade[b])
+                color = fx.scale_color(bright if k > 0.6 else mid, 0.35 + 0.75 * k)
+                thickness = 2 if k > 0.72 else 1
+                p1 = (int(screen[a, 0]), int(screen[a, 1]))
+                p2 = (int(screen[b, 0]), int(screen[b, 1]))
+                cv2.line(layer, p1, p2, color, thickness, cv2.LINE_AA)
+
+        # köşe düğümleri
+        for i in range(len(screen)):
+            if shade[i] > 0.45:
+                fx.add_radial(layer, screen[i, 0], screen[i, 1], 5, core,
+                              power=1.8, gain=0.5 + 0.5 * charge)
+
+        # taban halkası + hafif hacim hissi
+        base_y = float(screen[:, 1].max()) + 18
+        radius = int(self.scale * 0.75)
+        cv2.ellipse(layer, (int(self.cx), int(base_y)), (radius, max(3, radius // 4)),
+                    0, 0, 360, fx.scale_color(deep, 1.6), 1, cv2.LINE_AA)
+        fx.add_radial(layer, self.cx, self.cy, int(self.scale * 1.25), deep,
+                      power=3.0, gain=0.22)
