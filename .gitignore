@@ -9,12 +9,12 @@ venv/
 .venv/
 env/
 
-# Çıktılar
+# Kayitlar / ekran goruntuleri
 captures/*.png
 captures/*.mp4
 captures/*.avi
 
-# Editör / işletim sistemi
+# Editor / isletim sistemi
 .vscode/
 .idea/
 .DS_Store
