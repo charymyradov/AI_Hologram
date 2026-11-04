@@ -12,7 +12,10 @@ Modlar
 
 Jestler
   2 elle pinch yapıp bırakmak -> şok dalgası (şarj arttıkça büyür)
-  eller hızla birbirine yaklaşınca ("el çırpma") -> güçlü şok dalgası
+  eller hızla birbirine yaklaşınca ("el çarpma") -> güçlü şok dalgası
+  yumruk -> hologramı kavra, savurarak döndür
+  T -> sadece Türkmenistan haritası (diğer efektler kapanır)
+  A -> haritada Aşkabat'taki Bagt Köşgi binası
 
 Kısayollar en altta, HUD'da görünür.
 """
@@ -32,7 +35,7 @@ import config
 import fx
 import hud
 from effects import HologramEffect, LightningEffect, OrbEffect, PortalEffect
-from projectiles import ThrowableField
+from mapview import TurkmenistanMap
 from tracking import HandTracker
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,14 +60,21 @@ class App:
         self.cap = self._open_camera(camera)
         self.tracker = HandTracker()
         self.bloom = fx.Bloom()
+        self.postfx = fx.PostFX()
         self.waves = fx.ShockwaveField()
-        self.throwables = ThrowableField(on_pop=self._on_impact)
 
         self.orb = OrbEffect()
         self.holo = HologramEffect()
         self.portal = PortalEffect()
         self.lightning = LightningEffect()
         self.effects = {e.name: e for e in (self.orb, self.holo, self.portal, self.lightning)}
+        self.map = TurkmenistanMap()
+
+        # İki ayrı afterimage tamponu: arka efektler eller tarafından kesilir,
+        # avuçtan çıkan ön efektler (portal, harita) kesilmez.
+        self.trail_back = fx.Afterimage()
+        self.trail_front = fx.Afterimage()
+        self.postfx_enabled = config.POSTFX_ENABLED
 
         self.mode = mode
         self.palette_names = list(config.PALETTES)
@@ -73,15 +83,16 @@ class App:
 
         self.charge = 0.0
         self._prev_gap: float | None = None
-        self._last_throw: dict[str, float] = {}
-        self.throw_enabled = config.THROW_ENABLED
+        self._map_mode = False
 
         self.debug = debug
         self.show_hud = True
         self.fullscreen = False
 
         self.writer: cv2.VideoWriter | None = None
-        self.layer: np.ndarray | None = None
+        self.layer: np.ndarray | None = None   # ellerin arkasında kalan efektler
+        self.front: np.ndarray | None = None   # ellerin önünde duran efektler
+        self.combined: np.ndarray | None = None
 
     # ------------------------------------------------------------- kamera
     @staticmethod
@@ -134,30 +145,6 @@ class App:
             self.charge = 0.0
         self._prev_gap = gap
 
-    # ---------------------------------------------------------- fırlatma
-    def _maybe_throw(self, hands) -> None:
-        """Eli hızlı savurmak avuçtan bir enerji topu fırlatır."""
-        now = time.perf_counter()
-        for hand in hands:
-            speed = float(np.linalg.norm(hand.velocity))
-            if speed < config.THROW_SPEED:
-                continue
-            if now - self._last_throw.get(hand.label, 0.0) < config.THROW_COOLDOWN:
-                continue
-
-            self._last_throw[hand.label] = now
-            gain = config.THROW_VELOCITY_GAIN
-            self.throwables.spawn(
-                hand.center[0], hand.center[1],
-                float(hand.velocity[0]) * gain,
-                float(hand.velocity[1]) * gain,
-                self.palette[2],
-            )
-
-    def _on_impact(self, x: float, y: float, radius: float, color) -> None:
-        """Top patladığında şok dalgası bırakır."""
-        self.waves.burst(x, y, radius, color, life=0.55, thickness=4.0)
-
     # ------------------------------------------------------------- döngü
     def run(self) -> None:
         prev_time = time.perf_counter()
@@ -176,8 +163,11 @@ class App:
 
             if self.layer is None or self.layer.shape != frame.shape:
                 self.layer = np.zeros_like(frame)
+                self.front = np.zeros_like(frame)
+                self.combined = np.zeros_like(frame)
             else:
                 self.layer[:] = 0
+                self.front[:] = 0
 
             now = time.perf_counter()
             raw_dt = max(now - prev_time, 1e-4)
@@ -186,43 +176,75 @@ class App:
             fps = fps * 0.9 + (1.0 / raw_dt) * 0.1 if fps else 1.0 / raw_dt
 
             hands = self.tracker.process(frame, dt)
-            self.update_gestures(hands, dt)
 
-            if self.throw_enabled:
-                self._maybe_throw(hands)
-                self.throwables.update(dt, hands, frame.shape[1], frame.shape[0])
+            # Harita güncellenir; kapanış animasyonu bitene kadar sahne onundur.
+            self.map.update(dt, hands, frame.shape)
+            map_mode = self.map.active()
+            if map_mode != self._map_mode:
+                self.trail_back.reset()
+                self.trail_front.reset()
+                self.waves.clear()
+                self.charge = 0.0
+                self._map_mode = map_mode
 
-            mode = self.active_mode(len(hands))
-            effect = self.effects.get(mode) if mode else None
-            if effect is not None:
-                effect.update(dt, hands, self.charge)
-                effect.draw(self.layer, hands, self.charge, self.palette)
+            if map_mode:
+                # Sadece harita: diğer efektler söner, HUD ve jestler susar.
+                self.charge = max(0.0, self.charge - dt * 2.0)
+                for effect in self.effects.values():
+                    effect.update(dt, [], self.charge)
+                self.map.draw(self.front, hands, self.charge)
+                self.combined[:] = self.front
+            else:
+                self.update_gestures(hands, dt)
 
-            if self.throw_enabled:
-                self.throwables.draw(self.layer, self.palette[2])
+                mode = self.active_mode(len(hands))
+                effect = self.effects.get(mode) if mode else None
+                if effect is not None:
+                    effect.update(dt, hands, self.charge)
+                    target = self.layer if effect.mask_hands else self.front
+                    effect.draw(target, hands, self.charge, self.palette)
 
-            self.waves.update(dt)
-            self.waves.draw(self.layer)
+                self.waves.update(dt)
+                self.waves.draw(self.layer)
 
-            frame = self.bloom.apply(frame, self.layer)
+                hand_mask = None
+                if config.HAND_MASK_ENABLED and hands:
+                    hand_mask = fx.hands_mask(frame.shape, hands)
 
-            if self.debug:
-                self.tracker.draw_debug(frame, hands)
+                if config.AFTERIMAGE_ENABLED:
+                    back = self.trail_back.apply(self.layer)
+                    front = self.trail_front.apply(self.front)
+                else:
+                    back, front = self.layer, self.front
 
-            if self.show_hud:
-                hud.draw(
-                    frame,
-                    fps=fps,
-                    mode=mode,
-                    hand_count=len(hands),
-                    charge=self.charge,
-                    palette_name=self.palette_names[self.palette_index],
-                    needs=effect.needs if effect else 0,
-                    shape=self.holo.shape_name if mode == "HOLO" else None,
-                    recording=self.writer is not None,
-                    throw_count=len(self.throwables.items) if self.throw_enabled else 0,
-                    throw_enabled=self.throw_enabled,
-                )
+                if hand_mask is not None:
+                    fx.apply_hand_mask(back, hand_mask)
+
+                cv2.add(back, front, dst=self.combined)
+
+            frame = self.bloom.apply(frame, self.combined)
+
+            if self.postfx_enabled:
+                frame = self.postfx.apply(frame)
+
+            if not map_mode:
+                if self.debug:
+                    self.tracker.draw_debug(frame, hands)
+
+                if self.show_hud:
+                    hud.draw(
+                        frame,
+                        fps=fps,
+                        mode=mode,
+                        hand_count=len(hands),
+                        charge=self.charge,
+                        palette_name=self.palette_names[self.palette_index],
+                        needs=effect.needs if effect else 0,
+                        shape=self.holo.shape_name if mode == "HOLO" else None,
+                        recording=self.writer is not None,
+                        gesture=" ".join(hand.gesture for hand in hands),
+                        postfx=self.postfx_enabled,
+                    )
 
             if self.writer is not None:
                 self.writer.write(frame)
@@ -257,9 +279,14 @@ class App:
         elif key == ord("r"):
             self.toggle_recording(frame)
         elif key == ord("t"):
-            self.throw_enabled = not self.throw_enabled
-            if not self.throw_enabled:
-                self.throwables.clear()
+            self.map.toggle()
+        elif key == ord("a"):
+            self.map.open()
+            self.map.toggle_building()
+        elif key == ord("c"):
+            self.map.reset(frame.shape[1], frame.shape[0])
+        elif key == ord("v"):
+            self.postfx_enabled = not self.postfx_enabled
         elif key == ord("f"):
             self.toggle_fullscreen()
         return True
@@ -314,7 +341,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    print("Q: çıkış | 0-4: mod | G: şekil | P: renk | D: debug | S: ekran görüntüsü | R: kayıt | F: tam ekran")
+    print("Q: çıkış | 0-4: mod | G: şekil | P: renk | T: harita | A: Aşkabat binası | "
+          "V: post-process | D: debug | S: ekran görüntüsü | R: kayıt | F: tam ekran")
     try:
         App(camera=args.camera, mode=args.mode, debug=args.debug).run()
     except RuntimeError as exc:
