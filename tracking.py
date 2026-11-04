@@ -45,6 +45,22 @@ class HandState:
     def fist(self) -> bool:
         return self.extended == 0 and self.pinch < 0.6
 
+    @property
+    def gesture(self) -> str:
+        """Kaba jest sınıfı: PINCH / FIST / OPEN / HAND."""
+        if self.pinch > 0.8:
+            return "PINCH"
+        if self.fist:
+            return "FIST"
+        if self.openness >= 0.75:
+            return "OPEN"
+        return "HAND"
+
+    @property
+    def grab(self) -> bool:
+        """Kavrama jesti (yumruk veya güçlü pinch)."""
+        return self.fist or self.pinch > 0.82
+
     def fingertip(self, index: int = 8) -> np.ndarray:
         return self.landmarks[index]
 
@@ -109,9 +125,17 @@ class HandTracker:
         pinch = float(np.clip(1.0 - (pinch_raw - 0.25) / 0.55, 0.0, 1.0))
 
         extended = 0
+        ratios = []
         for tip, pip in zip(FINGER_TIPS, FINGER_PIPS):
-            if np.linalg.norm(pts[tip] - pts[0]) > np.linalg.norm(pts[pip] - pts[0]) * 1.08:
+            tip_d = float(np.linalg.norm(pts[tip] - pts[0]))
+            pip_d = float(np.linalg.norm(pts[pip] - pts[0]))
+            ratio = tip_d / max(pip_d, 1e-3)
+            if ratio > 1.08:
                 extended += 1
+            # Sürekli açıklık: 1.0 (tam bükük) -> 1.6 (tam açık) aralığını 0..1'e çek.
+            ratios.append(float(np.clip((ratio - 1.0) / 0.6, 0.0, 1.0)))
+
+        openness = float(np.mean(ratios)) if ratios else 0.0
 
         prev = self._prev_center.get(label)
         if prev is None:
@@ -129,7 +153,7 @@ class HandTracker:
             landmarks=pts,
             palm_size=palm_size,
             pinch=pinch,
-            openness=extended / 4.0,
+            openness=openness,
             extended=extended,
             velocity=vel,
         )
