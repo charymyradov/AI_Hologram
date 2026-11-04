@@ -110,6 +110,11 @@ MAP_SCALE_DEFAULT = 235.0
 MAP_SCALE_PER_DISTANCE = 0.55  # iki el mesafesi -> ölçek
 MAP_GRID = 0.24            # enlem/boylam ızgara aralığı (normalize birim)
 
+# Açık avuç haritayı sürüklemez; sadece ölçekler. Taşımak için yumruk yap.
+# True yaparsan eski davranışa (avuç takibi) dönersin.
+MAP_FOLLOW_OPEN_HAND = False
+MAP_HAND_SMOOTHING = 12.0  # el açıklığı/mesafesini yumuşatma hızı
+
 # Harita her zaman yeşil bir hologramdır (BGR).
 MAP_PALETTE = (
     (18, 62, 14),      # koyu

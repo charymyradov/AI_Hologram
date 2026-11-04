@@ -53,9 +53,9 @@ python main.py --camera 1     # ikinci kamera
 ekranda yalnızca yeşil Türkmenistan hologramı kalır. Gerçek sınır verisi
 `data/turkmenistan.json` içinde (54 nokta, GeoJSON'dan üretildi).
 
-- **Tek el**: avucu takip eder; avucu açıp kapatmak haritayı büyütür/küçültür.
-- **İki el**: eller arası mesafe ölçeği belirler, orta nokta haritanın merkezidir.
-- **Yumruk**: haritayı kavrayıp taşırsın (boyut değişmez).
+- **Tek el**: avucu açıp kapatmak haritayı büyütür/küçültür. Harita merkezde kalır.
+- **İki el**: eller arası mesafe ölçeği belirler. Harita kendiliğinden kaymaz.
+- **Yumruk**: haritayı kavrayıp taşırsın (boyut değişmez); sadece bu sırada konum değişir.
 - **A**: Aşkabat'taki Bagt Köşgi (Düğün Sarayı) binasını yerden yükselterek oluşturur.
   Harita kapalıysa önce haritayı açar; tekrar `A` binayı gizler.
 - `C` haritayı ekranın ortasına ve varsayılan boyuta döndürür.
@@ -106,7 +106,9 @@ legacy/       eski tek dosyalık sürüm
 - `front` (ön): PORTAL ve harita. Avuçtan çıkıyormuş gibi ellerin önünde çizilir.
 
 Harita modu açıkken `layer` tamamen boş kalır, `front` yalnızca haritayı taşır ve
-afterimage devre dışıdır; böylece harita eli takip ederken hayalet iz bırakmaz.
+afterimage devre dışıdır; böylece harita hareket ederken hayalet iz birikmez.
+Açık avuç haritayı sürüklemez; sadece ölçekler. Bu yüzden düşük FPS'te bile
+harita ekranda zıplamaz.
 Kapaklanma animasyonu sıfıra inene kadar da diğer efektler geri getirilmez.
 
 Normal modda iki katman toplanır, `fx.Afterimage` ile hareket izi eklenir, sonra
@@ -151,6 +153,8 @@ Daha hızlı takip için `config.MODEL_COMPLEXITY = 0` ve/veya
 - Harita çok büyük/küçük açılıyorsa: `MAP_SCALE_DEFAULT`; el ile ulaşılan
   sınırlar için `MAP_SCALE_MIN/MAX`.
 - Harita rengi: `MAP_PALETTE` (varsayılan yeşil, BGR sırası).
+- Açık avucun haritayı sürüklemesini istiyorsan: `MAP_FOLLOW_OPEN_HAND = True`.
+- El ölçüsü titriyorsa: `MAP_HAND_SMOOTHING` ↑ (daha yumuşak, biraz daha gecikmeli).
 - Açılış/kapanış hızı: `MAP_REVEAL_TIME` / `MAP_HIDE_TIME`.
 - Bina boyu ve oluşma süresi: `MAP_BUILDING_HEIGHT` / `MAP_BUILDING_REVEAL`.
 - Harita eli çok sıkı takip ediyorsa: `mapview.TurkmenistanMap.__init__`

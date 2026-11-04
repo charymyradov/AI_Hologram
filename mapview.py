@@ -61,6 +61,10 @@ class TurkmenistanMap:
                                  stiffness=190.0, damping=25.0)
         self.size = fx.Spring(config.MAP_SCALE_DEFAULT, stiffness=85.0, damping=16.0)
 
+        # Açık avuçta hedef sürekli zıplamasın: el ölçülerini yumuşat.
+        self._open_smooth: float | None = None
+        self._dist_smooth: float | None = None
+
         self._scratch: np.ndarray | None = None
         self._body: np.ndarray | None = None
         self._mask: np.ndarray | None = None
@@ -103,6 +107,8 @@ class TurkmenistanMap:
     def reset(self, width: int, height: int) -> None:
         self.center.set(width * 0.5, height * 0.5)
         self.size.set(config.MAP_SCALE_DEFAULT)
+        self._open_smooth = None
+        self._dist_smooth = None
 
     def percent(self) -> int:
         return int(round(self.size.value / config.MAP_SCALE_DEFAULT * 100.0))
@@ -145,23 +151,40 @@ class TurkmenistanMap:
         if len(hands) >= 2:
             a, b = hands[0].center, hands[1].center
             dist = float(np.linalg.norm(a - b))
-            target_scale = float(np.clip(dist * config.MAP_SCALE_PER_DISTANCE,
+            if self._dist_smooth is None:
+                self._dist_smooth = dist
+            else:
+                self._dist_smooth = fx.smooth(
+                    self._dist_smooth, dist, dt, config.MAP_HAND_SMOOTHING
+                )
+            target_scale = float(np.clip(self._dist_smooth * config.MAP_SCALE_PER_DISTANCE,
                                          config.MAP_SCALE_MIN, config.MAP_SCALE_MAX))
-            target_center = fx.midpoint(a, b)
+            # Açık eller sadece ölçekler; taşımak için yumruk gerekir.
+            if config.MAP_FOLLOW_OPEN_HAND or any(h.grab for h in hands):
+                target_center = fx.midpoint(a, b)
         elif hands:
             hand = hands[0]
             if hand.grab:
-                # Yumruk = sadece taşı; boyut olduğu gibi kalsın.
+                # Yumruk = taşı; boyut olduğu gibi kalsın.
                 target_scale = float(self.size.value)
+                target_center = (float(hand.center[0]), float(hand.center[1]))
             else:
+                if self._open_smooth is None:
+                    self._open_smooth = float(hand.openness)
+                else:
+                    self._open_smooth = fx.smooth(
+                        self._open_smooth, float(hand.openness), dt,
+                        config.MAP_HAND_SMOOTHING
+                    )
                 target_scale = float(np.clip(
-                    config.MAP_SCALE_MIN + hand.openness * (config.MAP_SCALE_MAX - config.MAP_SCALE_MIN),
+                    config.MAP_SCALE_MIN + self._open_smooth * (config.MAP_SCALE_MAX - config.MAP_SCALE_MIN),
                     config.MAP_SCALE_MIN, config.MAP_SCALE_MAX))
-            target_center = (float(hand.center[0]), float(hand.center[1]))
+                if config.MAP_FOLLOW_OPEN_HAND:
+                    target_center = (float(hand.center[0]), float(hand.center[1]))
 
         if target_center is not None:
-            half_w = ASPECT_X * target_scale * 0.86
-            half_h = target_scale * 0.86
+            half_w = ASPECT_X * target_scale * 0.98
+            half_h = target_scale * 0.98
             cx = float(np.clip(target_center[0], min(half_w, w * 0.5), max(w - half_w, w * 0.5)))
             cy = float(np.clip(target_center[1], min(half_h, h * 0.5), max(h - half_h, h * 0.5)))
             self.center.aim(cx, cy)

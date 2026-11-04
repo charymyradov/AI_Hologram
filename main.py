@@ -189,6 +189,9 @@ class App:
 
             if map_mode:
                 # Sadece harita: diğer efektler söner, HUD ve jestler susar.
+                # Geçişten bağımsız olarak iz tamponlarını temiz tut.
+                self.trail_back.reset()
+                self.trail_front.reset()
                 self.charge = max(0.0, self.charge - dt * 2.0)
                 for effect in self.effects.values():
                     effect.update(dt, [], self.charge)
