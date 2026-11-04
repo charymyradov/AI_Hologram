@@ -180,6 +180,9 @@ class ShockwaveField:
                  life=max(life, 0.05), color=color, w=thickness)
         )
 
+    def clear(self) -> None:
+        self.waves.clear()
+
     def update(self, dt: float) -> None:
         for wave in self.waves:
             wave["t"] += dt
@@ -216,6 +219,210 @@ class ShockwaveField:
                 wave["t"] = wave["life"]
 
 
+# ------------------------------------------------------------------ yay fiziği
+class Spring:
+    """Kritik sönümlemeye yakın tek boyutlu yay.
+
+    `smooth()` sadece hedefe doğru sönerek yaklaşır; yay ise hız kazanıp
+    hafifçe aşabilir. Hologramın "ağırlığı" buradan gelir. Kare süresi ne
+    olursa olsun kararlı kalsın diye içeride sabit alt adımlarla entegre edilir.
+    """
+
+    __slots__ = ("value", "target", "velocity", "stiffness", "damping")
+
+    def __init__(self, value: float = 0.0, stiffness: float = 180.0,
+                 damping: float = 24.0) -> None:
+        self.value = float(value)
+        self.target = float(value)
+        self.velocity = 0.0
+        self.stiffness = float(stiffness)
+        self.damping = float(damping)
+
+    def set(self, value: float) -> None:
+        """Işınla: değeri ve hedefi anında eşitle (el ilk göründüğünde)."""
+        self.value = self.target = float(value)
+        self.velocity = 0.0
+
+    def update(self, dt: float) -> float:
+        dt = min(max(float(dt), 0.0), 0.1)
+        steps = max(1, int(math.ceil(dt * 240.0)))
+        h = dt / steps
+        for _ in range(steps):
+            acc = (self.target - self.value) * self.stiffness - self.velocity * self.damping
+            self.velocity += acc * h
+            self.value += self.velocity * h
+        return self.value
+
+    def nudge(self, amount: float) -> None:
+        self.velocity += float(amount)
+
+
+class Spring2:
+    """İki boyutlu yay (konum, hız vektörü ile birlikte)."""
+
+    __slots__ = ("value", "target", "velocity", "stiffness", "damping")
+
+    def __init__(self, x: float = 0.0, y: float = 0.0, stiffness: float = 200.0,
+                 damping: float = 26.0) -> None:
+        self.value = np.array([x, y], np.float32)
+        self.target = self.value.copy()
+        self.velocity = np.zeros(2, np.float32)
+        self.stiffness = float(stiffness)
+        self.damping = float(damping)
+
+    def set(self, x, y) -> None:
+        self.value[:] = (float(x), float(y))
+        self.target[:] = self.value
+        self.velocity[:] = 0.0
+
+    def aim(self, x, y) -> None:
+        self.target[:] = (float(x), float(y))
+
+    def update(self, dt: float) -> np.ndarray:
+        dt = min(max(float(dt), 0.0), 0.1)
+        steps = max(1, int(math.ceil(dt * 240.0)))
+        h = dt / steps
+        for _ in range(steps):
+            acc = (self.target - self.value) * self.stiffness - self.velocity * self.damping
+            self.velocity += acc * h
+            self.value += self.velocity * h
+        return self.value
+
+
+# ------------------------------------------------------------------ el maskesi
+# Her parmak için landmark zinciri (0 = bilek).
+FINGER_CHAINS = (
+    (0, 1, 2, 3, 4),
+    (0, 5, 6, 7, 8),
+    (0, 9, 10, 11, 12),
+    (0, 13, 14, 15, 16),
+    (0, 17, 18, 19, 20),
+)
+
+
+def hands_mask(shape, hands, feather: int | None = None,
+               grow: int | None = None) -> np.ndarray:
+    """Ellerin silüetini 0..255 maskeye çizer (avuç + parmaklar).
+
+    Convex hull kullanmıyoruz: parmakların arasındaki boşluk gerçekte el
+    olmadığı için oradaki efektin kesilmemesi gerekir.
+    """
+    h, w = shape[:2]
+    mask = np.zeros((h, w), np.uint8)
+    if not hands:
+        return mask
+
+    for hand in hands:
+        pts = hand.landmarks
+        palm = pts[[0, 5, 9, 13, 17]].astype(np.int32)
+        cv2.fillConvexPoly(mask, palm, 255)
+        palm_r = max(4, int(hand.palm_size * 0.36))
+        cv2.circle(mask, (int(hand.center[0]), int(hand.center[1])), palm_r, 255, -1)
+
+        thickness = max(5, int(hand.palm_size * 0.19))
+        for chain in FINGER_CHAINS:
+            cv2.polylines(mask, [pts[list(chain)].astype(np.int32)], False,
+                          255, thickness, cv2.LINE_AA)
+
+    grow = config.HAND_MASK_GROW if grow is None else grow
+    if grow > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (grow * 2 + 1, grow * 2 + 1))
+        mask = cv2.dilate(mask, kernel)
+
+    feather = config.HAND_MASK_FEATHER if feather is None else feather
+    if feather > 0:
+        # Kutu bulanıklaştırma, aynı yumuşaklığı GaussianBlur'dan ~6x hızlı verir.
+        k = feather * 2 + 1
+        mask = cv2.blur(mask, (k, k))
+    return mask
+
+
+def apply_hand_mask(layer: np.ndarray, mask: np.ndarray) -> None:
+    """Maskenin içini katmandan siler; efektler ellerin arkasında kalır."""
+    if mask is None:
+        return
+    inverse = cv2.bitwise_not(mask)
+    inv3 = cv2.merge([inverse, inverse, inverse])
+    cv2.multiply(layer, inv3, dst=layer, scale=1.0 / 255.0)
+
+
+# ------------------------------------------------------------------ afterimage
+class Afterimage:
+    """Önceki kareleri hafifçe soldurup birleştirir: hareket izi bırakır."""
+
+    def __init__(self, decay: float = config.AFTERIMAGE_DECAY) -> None:
+        self.decay = float(decay)
+        self.buffer: np.ndarray | None = None
+
+    def reset(self) -> None:
+        """Tamponu temizle; mod geçişlerinde hayalet iz bırakmaz."""
+        if self.buffer is not None:
+            self.buffer[:] = 0
+
+    def apply(self, layer: np.ndarray) -> np.ndarray:
+        if self.buffer is None or self.buffer.shape != layer.shape:
+            self.buffer = layer.copy()
+        else:
+            cv2.convertScaleAbs(self.buffer, dst=self.buffer, alpha=self.decay)
+            cv2.max(self.buffer, layer, dst=self.buffer)
+        return self.buffer
+
+
+# ------------------------------------------------------------------ post-process
+class PostFX:
+    """Bloom sonrası ince görüntü işleme: kroma kayması, grain, vinyet, tarama."""
+
+    def __init__(self) -> None:
+        self._shape: tuple[int, int] | None = None
+        self._grade: np.ndarray | None = None
+        self._grain_bank: list[np.ndarray] = []
+        self._grain_index = 0
+
+    def _build(self, shape) -> None:
+        h, w = int(shape[0]), int(shape[1])
+        yy, xx = np.mgrid[-1.0:1.0:h * 1j, -1.0:1.0:w * 1j]
+        d = np.sqrt((xx * xx + yy * yy) * 0.5)
+        falloff = np.clip(1.0 - config.POSTFX_VIGNETTE * (d ** 2.2), 0.0, 1.0)
+        vignette = (falloff * 255.0)[:, :, None].astype(np.uint8)
+
+        rows = np.ones((h, 1, 1), np.float32)
+        rows[1::2] = 1.0 - config.POSTFX_SCANLINE
+        scan = np.repeat((rows * 255.0).astype(np.uint8), w, axis=1)
+
+        # Vinyet ve taramayı tek maskede birleştir: kare başına tek çarpma.
+        self._grade = cv2.multiply(cv2.merge([vignette] * 3), cv2.merge([scan] * 3),
+                                   scale=1.0 / 255.0)
+
+        # Grain dokularını bir kez üret, her karede sırayla kullan.
+        self._grain_bank = []
+        grain = int(config.POSTFX_GRAIN)
+        if grain > 0:
+            for _ in range(5):
+                noise = np.random.randint(0, grain + 1, (max(1, h // 3), max(1, w // 3), 3),
+                                          np.uint8)
+                noise = cv2.resize(noise, (w, h), interpolation=cv2.INTER_NEAREST)
+                self._grain_bank.append(noise)
+        self._shape = (h, w)
+
+    def apply(self, frame: np.ndarray) -> np.ndarray:
+        h, w = frame.shape[:2]
+        if self._shape != (h, w):
+            self._build(frame.shape)
+
+        # kroma kayması: kanalları ayırmadan, görünümler üzerinden kaydır
+        shift = int(config.POSTFX_CHROMA)
+        if 0 < shift < w:
+            frame[:, shift:, 2] = frame[:, :-shift, 2].copy()
+            frame[:, :-shift, 0] = frame[:, shift:, 0].copy()
+
+        if self._grain_bank:
+            self._grain_index = (self._grain_index + 1) % len(self._grain_bank)
+            cv2.subtract(frame, self._grain_bank[self._grain_index], dst=frame)
+
+        cv2.multiply(frame, self._grade, dst=frame, scale=1.0 / 255.0)
+        return frame
+
+
 # ------------------------------------------------------------------ yardımcı
 def midpoint(p1, p2):
     return (float(p1[0]) + float(p2[0])) * 0.5, (float(p1[1]) + float(p2[1])) * 0.5
@@ -224,3 +431,21 @@ def midpoint(p1, p2):
 def smooth(current, target, dt: float, speed: float = 14.0):
     k = 1.0 - math.exp(-speed * dt)
     return current + (target - current) * k
+
+
+def smoothstep(x: float) -> float:
+    """0..1 aralığında yumuşak giriş/çıkış eğrisi."""
+    x = min(1.0, max(0.0, float(x)))
+    return x * x * (3.0 - 2.0 * x)
+
+
+def ease_out_cubic(x: float) -> float:
+    x = min(1.0, max(0.0, float(x)))
+    return 1.0 - (1.0 - x) ** 3
+
+
+def move_toward(current: float, target: float, delta: float) -> float:
+    """Hedefe sabit adımla yaklaş (aşmadan)."""
+    if current < target:
+        return min(target, current + delta)
+    return max(target, current - delta)
