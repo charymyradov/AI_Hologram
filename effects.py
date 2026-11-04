@@ -21,6 +21,7 @@ import fx
 class Effect:
     name = "?"
     needs = 0  # gereken el sayısı (HUD ipucu için)
+    mask_hands = True  # True: efekt ellerin arkasında kalır
 
     def update(self, dt: float, hands, charge: float = 0.0) -> None:
         pass
@@ -43,15 +44,23 @@ class OrbEffect(Effect):
         self.radius = 70.0
         self.particles = fx.ParticleSystem(config.ORB_PARTICLES)
         self._carry = 0.0
+        self._center = fx.Spring2(stiffness=230.0, damping=26.0)
+        self._size = fx.Spring(self.radius, stiffness=110.0, damping=19.0)
+        self._fade = 0.0
 
     def update(self, dt: float, hands, charge: float = 0.0) -> None:
         self.t += dt
 
         if len(hands) < 2:
+            # Eller ayrılınca küre donup kalmasın: yumuşakça sön.
+            self._fade = fx.smooth(self._fade, 0.0, dt, 11.0)
             if self.cx is not None:
                 self.particles.update(dt, self.cx, self.cy, pull=45.0, swirl=30.0)
+                if self._fade < 0.02:
+                    self.cx = self.cy = None
             return
 
+        self._fade = fx.smooth(self._fade, 1.0, dt, 11.0)
         a, b = hands[0].center, hands[1].center
         cx, cy = fx.midpoint(a, b)
         dist = float(np.linalg.norm(a - b))
@@ -61,10 +70,16 @@ class OrbEffect(Effect):
 
         if self.cx is None:
             self.cx, self.cy, self.radius = cx, cy, target
+            self._center.set(cx, cy)
+            self._size.set(target)
         else:
-            self.cx = fx.smooth(self.cx, cx, dt, 16.0)
-            self.cy = fx.smooth(self.cy, cy, dt, 16.0)
-            self.radius = fx.smooth(self.radius, target, dt, 10.0)
+            self._center.aim(cx, cy)
+            self._size.target = target
+            self._center.update(dt)
+            self._size.update(dt)
+            self.cx = float(self._center.value[0])
+            self.cy = float(self._center.value[1])
+            self.radius = float(self._size.value)
 
         self._carry += dt * (95.0 + 170.0 * charge)
         count = int(self._carry)
@@ -75,11 +90,11 @@ class OrbEffect(Effect):
         self.particles.update(dt, self.cx, self.cy, pull=85.0, swirl=60.0)
 
     def draw(self, layer, hands, charge: float, palette) -> None:
-        if self.cx is None:
+        if self.cx is None or self._fade < 0.01:
             return
 
         cx, cy = int(self.cx), int(self.cy)
-        deep, mid, bright, core = palette
+        deep, mid, bright, core = (fx.scale_color(c, self._fade) for c in palette)
         pulse = 1.0 + 0.035 * math.sin(self.t * 4.2) + 0.09 * charge
         r = max(10, int(self.radius * pulse))
 
@@ -128,6 +143,7 @@ class PortalEffect(Effect):
 
     name = "PORTAL"
     needs = 1
+    mask_hands = False  # avuçtan çıkar, elin önünde durur
 
     def __init__(self) -> None:
         self.t = 0.0
@@ -136,14 +152,22 @@ class PortalEffect(Effect):
         self.radius = 80.0
         self.particles = fx.ParticleSystem(config.PORTAL_PARTICLES)
         self._carry = 0.0
+        self._center = fx.Spring2(stiffness=230.0, damping=26.0)
+        self._size = fx.Spring(self.radius, stiffness=95.0, damping=17.5)
+        self._fade = 0.0
 
     def update(self, dt: float, hands, charge: float = 0.0) -> None:
         self.t += dt
 
         if not hands:
-            self.cx = None
+            self._fade = fx.smooth(self._fade, 0.0, dt, 11.0)
+            if self.cx is not None:
+                self.particles.update(dt, self.cx, self.cy, pull=60.0, swirl=95.0)
+                if self._fade < 0.02:
+                    self.cx = self.cy = None
             return
 
+        self._fade = fx.smooth(self._fade, 1.0, dt, 11.0)
         hand = hands[0]
         target = float(np.clip(config.PORTAL_RADIUS_MIN +
                                hand.openness * (config.PORTAL_RADIUS_MAX - config.PORTAL_RADIUS_MIN),
@@ -151,11 +175,19 @@ class PortalEffect(Effect):
         target *= (1.0 - 0.2 * charge)
 
         if self.cx is None:
-            self.cx, self.cy, self.radius = float(hand.center[0]), float(hand.center[1]), target
+            self.cx = float(hand.center[0])
+            self.cy = float(hand.center[1])
+            self.radius = target
+            self._center.set(self.cx, self.cy)
+            self._size.set(target)
         else:
-            self.cx = fx.smooth(self.cx, float(hand.center[0]), dt, 16.0)
-            self.cy = fx.smooth(self.cy, float(hand.center[1]), dt, 16.0)
-            self.radius = fx.smooth(self.radius, target, dt, 8.0)
+            self._center.aim(float(hand.center[0]), float(hand.center[1]))
+            self._size.target = target
+            self._center.update(dt)
+            self._size.update(dt)
+            self.cx = float(self._center.value[0])
+            self.cy = float(self._center.value[1])
+            self.radius = float(self._size.value)
 
         self._carry += dt * (55.0 + 90.0 * hand.openness + 120.0 * charge)
         count = int(self._carry)
@@ -167,11 +199,11 @@ class PortalEffect(Effect):
         self.particles.update(dt, self.cx, self.cy, pull=60.0, swirl=95.0)
 
     def draw(self, layer, hands, charge: float, palette) -> None:
-        if self.cx is None:
+        if self.cx is None or self._fade < 0.01:
             return
 
         cx, cy = int(self.cx), int(self.cy)
-        deep, mid, bright, core = palette
+        deep, mid, bright, core = (fx.scale_color(c, self._fade) for c in palette)
         r = max(12, int(self.radius))
 
         fx.add_radial(layer, cx, cy, int(r * 1.9), deep, power=3.0, gain=0.45)
@@ -242,25 +274,38 @@ class LightningEffect(Effect):
         self.t = 0.0
         self.particles = fx.ParticleSystem(240)
         self._rebuild = 0.0
+        self._tips = [fx.Spring2(stiffness=260.0, damping=29.0) for _ in range(2)]
+        self._tips_ready = False
 
     def update(self, dt: float, hands, charge: float = 0.0) -> None:
         self.t += dt
         self._rebuild -= dt
         if len(hands) >= 2:
             mid = fx.midpoint(hands[0].center, hands[1].center)
+            for i, hand in enumerate(hands[:2]):
+                tip = hand.fingertip(8)
+                if not self._tips_ready:
+                    self._tips[i].set(tip[0], tip[1])
+                else:
+                    self._tips[i].aim(tip[0], tip[1])
+                    self._tips[i].update(dt)
+            self._tips_ready = True
+
             if self._rebuild <= 0:
                 self._rebuild = 0.05
                 self.particles.emit(mid[0], mid[1], 26, 4, speed=60.0,
                                     life=(0.25, 0.6))
             self.particles.update(dt, mid[0], mid[1], pull=40.0, swirl=70.0)
+        else:
+            self._tips_ready = False
 
     def draw(self, layer, hands, charge: float, palette) -> None:
         if len(hands) < 2:
             return
 
         _, mid, bright, core = config.LIGHTNING_PALETTE
-        p1 = hands[0].fingertip(8)
-        p2 = hands[1].fingertip(8)
+        p1 = self._tips[0].value
+        p2 = self._tips[1].value
 
         # geniş ve soluk taban çizgisi -> bloom ile yumuşak hale
         main = _bolt(p1, p2, depth=6, jitter=0.35)
@@ -364,6 +409,10 @@ class HologramEffect(Effect):
         self.scale = 120.0
         self.yaw = 0.0
         self.pitch = -0.35
+        self._center = fx.Spring2(stiffness=170.0, damping=23.0)
+        self._size = fx.Spring(self.scale, stiffness=80.0, damping=16.0)
+        self._spin = 0.0
+        self._fade = 0.0
 
     @property
     def shape_name(self) -> str:
@@ -375,6 +424,14 @@ class HologramEffect(Effect):
     def update(self, dt: float, hands, charge: float = 0.0) -> None:
         self.t += dt
 
+        if len(hands) < 2:
+            # Eller çekilince nesne ekranda donmasın; sönerek kaybol.
+            self._fade = fx.smooth(self._fade, 0.0, dt, 11.0)
+            if self._fade < 0.02:
+                self.cx = self.cy = None
+            return
+
+        self._fade = fx.smooth(self._fade, 1.0, dt, 11.0)
         target_yaw = self.yaw + dt * 0.35
         target_pitch = -0.32 + 0.16 * math.sin(self.t * 0.8)
         cx, cy, target_scale = self.cx, self.cy, self.scale
@@ -394,10 +451,26 @@ class HologramEffect(Effect):
             return
         if self.cx is None:
             self.cx, self.cy, self.scale = cx, cy, target_scale
+            self._center.set(cx, cy)
+            self._size.set(target_scale)
         else:
-            self.cx = fx.smooth(self.cx, cx, dt, 12.0)
-            self.cy = fx.smooth(self.cy, cy, dt, 12.0)
-            self.scale = fx.smooth(self.scale, target_scale, dt, 8.0)
+            self._center.aim(cx, cy)
+            self._size.target = target_scale
+            self._center.update(dt)
+            self._size.update(dt)
+            self.cx = float(self._center.value[0])
+            self.cy = float(self._center.value[1])
+            self.scale = float(self._size.value)
+
+        # Yumruk: nesne kavranır, otomatik dönme durur; elin savurması spin verir.
+        grabber = next((h for h in hands if h.grab), None) if config.FIST_GRAB else None
+        if grabber is not None:
+            vx = float(grabber.velocity[0])
+            self._spin = 0.62 * self._spin + 0.38 * (vx / max(self.scale, 1.0) * 2.4)
+            self.yaw += self._spin * dt
+            target_yaw = self.yaw
+        else:
+            self._spin *= math.exp(-config.GRAB_SPIN_DAMPING * dt)
 
         self.yaw = fx.smooth(self.yaw, target_yaw, dt, 6.0)
         self.pitch = fx.smooth(self.pitch, target_pitch, dt, 5.0)
@@ -417,10 +490,10 @@ class HologramEffect(Effect):
         return screen, depth
 
     def draw(self, layer, hands, charge: float, palette) -> None:
-        if self.cx is None:
+        if self.cx is None or self._fade < 0.01:
             return
 
-        deep, mid, bright, core = palette
+        deep, mid, bright, core = (fx.scale_color(c, self._fade) for c in palette)
         verts, paths = self._geometries[self.shape_name]
         screen, depth = self._project(verts)
 
