@@ -47,18 +47,6 @@ CHARGE_MIN_TO_BURST = 0.12
 CLAP_GAP = 110            # eller bu mesafeden yakınsa "el çırpma"
 CLAP_PREVIOUS_GAP = 260   # önceki karede en az bu kadar açık olmalı
 
-# ---------------------------------------------------------------- fırlatma
-THROW_ENABLED = True
-THROW_SPEED = 1150.0      # px/s: eli bu hızdan hızlı savurursan top fırlar
-THROW_VELOCITY_GAIN = 1.35
-THROW_COOLDOWN = 0.45     # aynı elle iki atış arası en az süre (saniye)
-THROW_MAX = 6             # sahnede aynı anda en fazla top
-THROW_LIFE = 3.2          # saniye; süre bitince patlar
-THROW_GRAVITY = 260.0     # px/s^2
-THROW_WALL_BOUNCE = 0.78
-THROW_HAND_BOUNCE = 0.86
-THROW_RADIUS = (14.0, 20.0)
-
 # ---------------------------------------------------------------- renkler (BGR)
 # Her palet: koyu -> orta -> parlak -> çekirdek
 PALETTES = {
@@ -91,9 +79,58 @@ LIGHTNING_PALETTE = (
     (250, 250, 255),
 )
 
+# ---------------------------------------------------------------- jest / yay
+# Yumruk = tut/sürükle, açık avuç = ölçek, iki el mesafesi = ölçek.
+FIST_GRAB = True           # yumrukla hologramı kavra ve döndür
+GRAB_SPIN_GAIN = 0.9       # yumruk savururken dönme kazancı
+GRAB_SPIN_DAMPING = 3.2    # bırakınca dönmenin sönümü
+
+# ---------------------------------------------------------------- el maskesi
+# Efektleri ellerin arkasında bırakır (ORB / HOLO / LIGHTNING / toplar).
+HAND_MASK_ENABLED = True
+HAND_MASK_FEATHER = 9      # kenar yumuşaklığı (px)
+HAND_MASK_GROW = 6         # maskeyi kaç piksel büyüt
+
+# ---------------------------------------------------------------- afterimage
+AFTERIMAGE_ENABLED = True
+AFTERIMAGE_DECAY = 0.82    # her karede izlerin çarpıldığı katsayı
+
+# ---------------------------------------------------------------- post-process
+POSTFX_ENABLED = True
+POSTFX_VIGNETTE = 0.55     # 0 = kapalı, 1 = sert köşe karartması
+POSTFX_SCANLINE = 0.14     # tek satır karartma oranı
+POSTFX_CHROMA = 2          # kroma kayması (px)
+POSTFX_GRAIN = 5           # grain şiddeti (0 = kapalı)
+
+# ---------------------------------------------------------------- harita
+MAP_FILE = "data/turkmenistan.json"
+MAP_SCALE_MIN = 115.0      # haritanın yarı yüksekliği (px)
+MAP_SCALE_MAX = 430.0
+MAP_SCALE_DEFAULT = 235.0
+MAP_SCALE_PER_DISTANCE = 0.55  # iki el mesafesi -> ölçek
+MAP_GRID = 0.24            # enlem/boylam ızgara aralığı (normalize birim)
+
+# Harita her zaman yeşil bir hologramdır (BGR).
+MAP_PALETTE = (
+    (18, 62, 14),      # koyu
+    (42, 148, 48),     # orta
+    (92, 236, 104),    # parlak
+    (214, 255, 214),   # çekirdek
+)
+
+# Açılış/kapanış yumuşaklığı (saniye).
+MAP_REVEAL_TIME = 0.34
+MAP_HIDE_TIME = 0.24
+
+# A: Aşkabat'taki Bagt Köşgi (Düğün Sarayı) hologramı.
+MAP_BUILDING_ENABLED = True
+MAP_BUILDING_HEIGHT = 0.56   # harita ölçeğine göre bina yüksekliği
+MAP_BUILDING_REVEAL = 1.15   # yerden yükselme süresi (saniye)
+
 # ---------------------------------------------------------------- HUD
 HUD_ALPHA = 0.45
 HUD_TEXT = (235, 240, 245)
 HUD_DIM = (150, 160, 172)
 
-KEYS_HELP = "1 ORB  2 HOLO  3 PORTAL  4 LIGHT  0 AUTO  |  G shape  P color  T throw  D debug  S shot  R rec  F full  Q quit"
+KEYS_HELP = ("1 ORB  2 HOLO  3 PORTAL  4 LIGHT  0 AUTO  |  G shape  P color  T map  "
+             "A building  V fx  D debug  S shot  R rec  F full  Q quit")
